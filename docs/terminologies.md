@@ -1,0 +1,19 @@
+## IAM & SSO Architectural Glossary
+
+The following table provides the core terminologies, their foundational definitions, and their exact operational roles within an authentication system spanning a **Spring Boot backend** and native mobile (**Android/iOS**) SDKs.
+
+| Term | Technical Definition & Meaning | Architectural Role (Spring Boot, Android, iOS) |
+| :--- | :--- | :--- |
+| **IAM (Identity and Access Management)** | The overarching framework of policies and technologies ensuring the right users have the appropriate access to technology resources. | The central IAM server manages user identities, credentials, password resets, and access control rules. |
+| **SSO (Single Sign-On)** | An authentication method allowing users to log in once with a single set of credentials to access multiple independent systems. | Enables users logging into the native iOS or Android apps to seamlessly access protected Spring Boot APIs without re-authentication. |
+| **IdP (Identity Provider)** | A system that creates, maintains, and manages identity information while providing authentication services to relying applications. | Your custom IAM server serves as the IdP, verifying credentials and issuing cryptographic tokens. |
+| **SP (Service Provider) / Relying Party** | The application or service that relies on the Identity Provider to authenticate users and provide identity information. | The Spring Boot server, Android SDK, and iOS SDK act as SPs relying on the custom IAM server. |
+| **OAuth 2.0** | The industry-standard authorization protocol allowing clients to obtain limited access to resources without exposing user credentials. | The underlying framework used by the central IAM server to issue secure access tokens to the mobile SDKs. |
+| **OIDC (OpenID Connect)** | A simple identity layer on top of OAuth 2.0 that allows clients to verify the identity of the end-user based on IdP authentication. | Utilized alongside OAuth 2.0 to provide standard user profile claims (e.g., email, username) directly to the native iOS and Android SDKs. |
+| **JWT (JSON Web Token)** | A compact, URL-safe container representing claims transferred between two parties, typically cryptographically signed. | The standardized token format issued by the IAM server and verified statelessly by the Spring Boot server. |
+| **Access Token** | A credential (typically a JWT) representing the authorization granted to the client, designed to be short-lived. | Attached by the mobile SDKs to the HTTP authorization headers of every API request routed to the Spring Boot server. |
+| **Refresh Token** | A long-lived, high-value token used to request new Access Tokens once they expire without prompting the user for credentials. | Securely stored in the mobile clients (using EncryptedSharedPreferences on Android and Keychain Services on iOS) to maintain persistent sessions. |
+| **ID Token** | A JWT containing verified claims about the end-user's identity (e.g., name, profile picture, email address). | Consumed locally by the Android and iOS SDKs to safely display user profile information within the application UI. |
+| **PKCE (Proof Key for Code Exchange)** | An extension to OAuth 2.0 designed to mitigate authorization code interception attacks on public clients. | **Mandatory** security implementation for Android and iOS SDKs to exchange authorization codes for tokens without storing a client secret. |
+| **Scopes** | A mechanism in OAuth 2.0 to limit an application's access to a user's account under specific boundaries. | Requested by the mobile SDKs during login and validated by the Spring Boot server to authorize specific API endpoint operations. |
+| **Claims** | Specific assertions of information embedded within a cryptographically signed token (e.g., user ID `sub`, role mappings). | Embedded in the JWT payload by the IAM server, enabling the Spring Boot server to statelessly parse user identity and enforce RBAC. |
