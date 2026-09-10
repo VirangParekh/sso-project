@@ -1,21 +1,43 @@
 openapi: 3.0.3
 info:
-  title: IAM Server Client Interface API
+  title: IAM Server Unified API Specification
   description: >
-    Production OpenID Connect (OIDC) Core 1.0 and OAuth 2.0 PKCE Client Interface Specification
-    for Custom IAM/SSO Identity Provider serving Mobile SDKs (Android/iOS) and Web Clients.
+    Consolidated OpenAPI 3.0 specification for the Custom IAM/SSO Identity Provider.
+    Covers both the Public Client Interface (Android SDK, iOS Framework, Web SPAs)
+    and the Machine-to-Machine Resource Server Interface (Spring Boot Server), including
+    standardized OAuth 2.0 / OIDC error response payloads.
   version: 1.0.0
 servers:
   - url: https://iam.example.com
     description: Production IAM Server (Identity Provider)
 
+tags:
+  - name: Client - Authentication & Authorization
+    description: Browser-based login, PKCE authorization code generation, and OIDC consent.
+  - name: Client - Token Management
+    description: Authorization code exchange, token refresh, and token revocation.
+  - name: Client - User Profile
+    description: End-user profile and identity claim resolution.
+  - name: Resource Server - Discovery & Metadata
+    description: OpenID Connect provider configuration discovery.
+  - name: Resource Server - Key Management
+    description: Public JSON Web Key Set (JWKS) retrieval for stateless RS256 token verification.
+  - name: Resource Server - Token Introspection
+    description: RFC 7662 token status introspection for Spring Boot or API Gateways.
+
 paths:
+  # =========================================================================
+  # CATEGORY 1: CLIENT INTERFACE ENDPOINTS
+  # =========================================================================
+
   /oauth2/authorize:
     get:
       summary: OAuth 2.0 / OIDC Authorization Endpoint (GET)
       description: >
         Initiates browser-based user authentication, consent, and authorization code issuance
         using mandatory PKCE parameters. Enforces https transport security.
+      tags:
+        - Client - Authentication & Authorization
       parameters:
         - name: response_type
           in: query
@@ -105,16 +127,16 @@ paths:
                 format: uri
               description: URI containing 'code' and 'state' query parameters.
         '400':
-          description: Invalid authorization request parameter or missing openid scope.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OAuthErrorResponse'
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
     post:
       summary: OAuth 2.0 / OIDC Authorization Endpoint (POST Form)
       description: >
         Alternative Form-Serialized authorization request endpoint accepting form parameters.
+      tags:
+        - Client - Authentication & Authorization
       requestBody:
         required: true
         content:
@@ -125,7 +147,9 @@ paths:
         '302':
           description: HTTP 302 Found redirection with authorization code.
         '400':
-          description: Invalid request parameters.
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /oauth2/token:
     post:
@@ -133,6 +157,8 @@ paths:
       description: >
         Exchanges an authorization code or refresh token for Access, ID, and Refresh Tokens.
         Requires HTTP POST with Content-Type application/x-www-form-urlencoded and returns Cache-Control: no-store.
+      tags:
+        - Client - Token Management
       requestBody:
         required: true
         content:
@@ -155,11 +181,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/TokenResponse'
         '400':
-          description: Invalid authorization code, PKCE verifier mismatch, or invalid refresh token.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OAuthErrorResponse'
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /userinfo:
     get:
@@ -167,6 +193,8 @@ paths:
       description: >
         Returns verified identity claims associated with the authenticated end-user.
         Requires an OAuth 2.0 Bearer Access Token over TLS.
+      tags:
+        - Client - User Profile
       security:
         - BearerAuth: []
       responses:
@@ -177,11 +205,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/UserInfoResponse'
         '401':
-          description: Unauthorized; Access Token missing, expired, or invalid.
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
     post:
       summary: OpenID Connect UserInfo Endpoint (POST)
       description: Alternative HTTP POST invocation for the UserInfo endpoint.
+      tags:
+        - Client - User Profile
       security:
         - BearerAuth: []
       responses:
@@ -192,13 +226,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/UserInfoResponse'
         '401':
-          description: Unauthorized; Access Token invalid.
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /oauth2/revoke:
     post:
       summary: OAuth 2.0 Token Revocation Endpoint
       description: >
         Invalidates active Refresh Tokens or Access Tokens upon explicit user logout.
+      tags:
+        - Client - Token Management
       requestBody:
         required: true
         content:
@@ -209,7 +249,94 @@ paths:
         '200':
           description: Token successfully revoked or previously invalid.
         '400':
-          description: Invalid revocation request parameters.
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # =========================================================================
+  # CATEGORY 2: RESOURCE SERVER INTERFACE ENDPOINTS
+  # =========================================================================
+
+  /.well-known/openid-configuration:
+    get:
+      summary: OpenID Provider Discovery Endpoint
+      description: >
+        Exposes OpenID Connect Provider metadata allowing the Spring Boot Resource Server
+        to dynamically discover endpoint URIs, supported algorithms, and capability parameters.
+      tags:
+        - Resource Server - Discovery & Metadata
+      responses:
+        '200':
+          description: Successfully returned OpenID Provider configuration metadata.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: max-age=3600, public
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenIDProviderConfiguration'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /.well-known/jwks.json:
+    get:
+      summary: JSON Web Key Set (JWKS) Endpoint
+      description: >
+        Publishes the IAM Server's public bare keys in JWK format. The Spring Boot Resource Server
+        retrieves these keys to statelessly verify the RS256 cryptographic signature of incoming JWT Access Tokens.
+      tags:
+        - Resource Server - Key Management
+      responses:
+        '200':
+          description: Successfully returned JSON Web Key Set containing active public signing keys.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: max-age=86400, public
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JWKSResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /oauth2/introspect:
+    post:
+      summary: OAuth 2.0 Token Introspection Endpoint (RFC 7662)
+      description: >
+        Allows the Spring Boot Resource Server or API Gateway to query the active status and embedded metadata
+        of an Access Token or Refresh Token. Secured via HTTP Basic Authentication using Resource Server client credentials.
+      tags:
+        - Resource Server - Token Introspection
+      security:
+        - ResourceServerBasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenIntrospectionRequest'
+      responses:
+        '200':
+          description: Successfully introspected token status. Returns active boolean and associated claim metadata.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenIntrospectionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
 components:
   securitySchemes:
@@ -218,8 +345,117 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: OAuth 2.0 Bearer Access Token issued by the IAM Server.
+    ResourceServerBasicAuth:
+      type: http
+      scheme: basic
+      description: >
+        HTTP Basic Authentication header using the Resource Server's registered client_id and client_secret
+        (Base64 encoded as 'Basic <credentials>').
+
+  responses:
+    BadRequestError:
+      description: Invalid request parameters, missing required fields, or PKCE verifier mismatch (HTTP 400).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OAuth2ErrorResponse'
+          examples:
+            InvalidGrant:
+              summary: PKCE Verification Failure or Expired Code
+              value:
+                error: invalid_grant
+                error_description: The code_verifier does not match the code_challenge or the authorization code is expired.
+                error_uri: https://iam.example.com/docs/errors#invalid_grant
+            InvalidRequest:
+              summary: Missing Mandatory Parameter
+              value:
+                error: invalid_request
+                error_description: Missing required parameter 'code_challenge'.
+                error_uri: https://iam.example.com/docs/errors#invalid_request
+
+    UnauthorizedError:
+      description: Authentication failed due to missing, invalid, or expired client credentials or access tokens (HTTP 401).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OAuth2ErrorResponse'
+          examples:
+            InvalidClient:
+              summary: Client Authentication Failure
+              value:
+                error: invalid_client
+                error_description: Client authentication failed (e.g. unknown client or invalid client secret).
+                error_uri: https://iam.example.com/docs/errors#invalid_client
+            InvalidToken:
+              summary: Expired or Malformed Bearer Token
+              value:
+                error: invalid_token
+                error_description: The Access Token expired or has an invalid signature.
+                error_uri: https://iam.example.com/docs/errors#invalid_token
+
+    ForbiddenError:
+      description: Insufficient permissions or scopes to access the requested resource (HTTP 403).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OAuth2ErrorResponse'
+          example:
+            error: insufficient_scope
+            error_description: The request requires the 'profile' scope.
+            error_uri: https://iam.example.com/docs/errors#insufficient_scope
+
+    InternalServerError:
+      description: Unexpected IAM server error (HTTP 500).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OAuth2ErrorResponse'
+          example:
+            error: server_error
+            error_description: The authorization server encountered an unexpected condition that prevented it from fulfilling the request.
+            error_uri: https://iam.example.com/docs/errors#server_error
 
   schemas:
+    # -------------------------------------------------------------------------
+    # ERROR RESPONSE SCHEMA
+    # -------------------------------------------------------------------------
+    OAuth2ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Standardized OAuth 2.0 / OIDC error code string.
+          example: invalid_grant
+          enum:
+            - invalid_request
+            - invalid_client
+            - invalid_grant
+            - unauthorized_client
+            - unsupported_grant_type
+            - invalid_scope
+            - login_required
+            - interaction_required
+            - consent_required
+            - account_selection_required
+            - insufficient_scope
+            - invalid_token
+            - server_error
+            - temporarily_unavailable
+        error_description:
+          type: string
+          description: Human-readable text providing additional details about the error.
+          example: The authorization code has expired or is invalid.
+        error_uri:
+          type: string
+          format: uri
+          description: Optional URI identifying a human-readable web page with error info.
+          example: https://iam.example.com/docs/errors#invalid_grant
+
+    # -------------------------------------------------------------------------
+    # CLIENT INTERFACE SCHEMAS
+    # -------------------------------------------------------------------------
     AuthorizationFormRequest:
       type: object
       required:
@@ -348,7 +584,7 @@ components:
     TokenRevocationRequest:
       type: object
       required:
-        - token
+        - token:
         - client_id
       properties:
         token:
@@ -360,24 +596,199 @@ components:
         client_id:
           type: string
 
-    OAuthErrorResponse:
+    # -------------------------------------------------------------------------
+    # RESOURCE SERVER INTERFACE SCHEMAS
+    # -------------------------------------------------------------------------
+    OpenIDProviderConfiguration:
       type: object
       required:
-        - error
+        - issuer
+        - authorization_endpoint
+        - token_endpoint
+        - userinfo_endpoint
+        - jwks_uri
+        - response_types_supported
+        - subject_types_supported
+        - id_token_signing_alg_values_supported
       properties:
-        error:
+        issuer:
           type: string
-          example: "invalid_grant"
-          enum:
-            - invalid_request
-            - invalid_client
-            - invalid_grant
-            - unauthorized_client
-            - unsupported_grant_type
-            - invalid_scope
-            - login_required
-            - interaction_required
-            - consent_required
-        error_description:
+          format: uri
+          example: https://iam.example.com
+          description: Case-sensitive HTTPS Issuer Identifier URL of the IAM Server.
+        authorization_endpoint:
           type: string
-          example: "The code_verifier does not match the code_challenge."
+          format: uri
+          example: https://iam.example.com/oauth2/authorize
+          description: URL of the IAM Server's OAuth 2.0 / OIDC Authorization Endpoint.
+        token_endpoint:
+          type: string
+          format: uri
+          example: https://iam.example.com/oauth2/token
+          description: URL of the IAM Server's OAuth 2.0 / OIDC Token Endpoint.
+        userinfo_endpoint:
+          type: string
+          format: uri
+          example: https://iam.example.com/userinfo
+          description: URL of the IAM Server's UserInfo Endpoint.
+        jwks_uri:
+          type: string
+          format: uri
+          example: https://iam.example.com/.well-known/jwks.json
+          description: URL of the IAM Server's JSON Web Key Set (JWKS) Endpoint.
+        revocation_endpoint:
+          type: string
+          format: uri
+          example: https://iam.example.com/oauth2/revoke
+          description: URL of the IAM Server's Token Revocation Endpoint.
+        introspection_endpoint:
+          type: string
+          format: uri
+          example: https://iam.example.com/oauth2/introspect
+          description: URL of the IAM Server's Token Introspection Endpoint.
+        response_types_supported:
+          type: array
+          items:
+            type: string
+          example: ["code"]
+          description: Supported OAuth 2.0 response_type values.
+        subject_types_supported:
+          type: array
+          items:
+            type: string
+          example: ["public"]
+          description: Supported Subject Identifier types (public or pairwise).
+        id_token_signing_alg_values_supported:
+          type: array
+          items:
+            type: string
+          example: ["RS256"]
+          description: Supported JWS signature algorithms for ID Tokens (must include RS256).
+        scopes_supported:
+          type: array
+          items:
+            type: string
+          example: ["openid", "profile", "email", "offline_access"]
+          description: Supported OAuth 2.0 scope values.
+        token_endpoint_auth_methods_supported:
+          type: array
+          items:
+            type: string
+          example: ["none", "client_secret_basic", "client_secret_post"]
+          description: Client authentication methods supported by the Token Endpoint.
+        claims_supported:
+          type: array
+          items:
+            type: string
+          example: ["iss", "sub", "aud", "exp", "iat", "nonce", "auth_time", "acr", "name", "email", "email_verified"]
+          description: Standard OIDC claims supported by this provider.
+        code_challenge_methods_supported:
+          type: array
+          items:
+            type: string
+          example: ["S256"]
+          description: PKCE code challenge methods supported (must include S256).
+
+    JWKSResponse:
+      type: object
+      required:
+        - keys
+      properties:
+        keys:
+          type: array
+          description: Array of JSON Web Keys (JWK) representing public signing keys.
+          items:
+            $ref: '#/components/schemas/JWKKey'
+
+    JWKKey:
+      type: object
+      required:
+        - kty
+        - use
+        - alg
+        - kid
+        - n
+        - e
+      properties:
+        kty:
+          type: string
+          enum: [RSA, EC]
+          example: RSA
+          description: Key Type. Must be 'RSA' for RS256 key pairs.
+        use:
+          type: string
+          enum: [sig, enc]
+          example: sig
+          description: Intended key usage. 'sig' indicates cryptographic signature verification.
+        alg:
+          type: string
+          example: RS256
+          description: Algorithm intended for use with the key. Must be RS256.
+        kid:
+          type: string
+          example: iam-rsa-key-2026-01
+          description: Key ID identifier used to match the 'kid' claim in JWT headers.
+        n:
+          type: string
+          example: u1W_qX82aM...
+          description: Base64URL-encoded modulus value for the RSA public key.
+        e:
+          type: string
+          example: AQAB
+          description: Base64URL-encoded exponent value for the RSA public key (typically 'AQAB').
+
+    TokenIntrospectionRequest:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+          description: The string value of the Access Token or Refresh Token to be introspected.
+          example: eyJhbGciOiJSUzI1NiIsImtpZCI6ImlhbS1yc2EtMSIs...
+        token_type_hint:
+          type: string
+          enum: [access_token, refresh_token]
+          example: access_token
+          description: Optional hint regarding the type of token presented.
+
+    TokenIntrospectionResponse:
+      type: object
+      required:
+        - active
+      properties:
+        active:
+          type: boolean
+          example: true
+          description: Boolean indicator showing whether the presented token is currently active and valid.
+        scope:
+          type: string
+          example: openid profile read:resources write:resources
+          description: Space-delimited list of authorized scope permissions granted to the token.
+        client_id:
+          type: string
+          example: mobile_android_client_id
+          description: Client identifier of the party to which the token was issued.
+        sub:
+          type: string
+          example: usr_9f83a21b4e
+          description: Subject Identifier of the user associated with the token.
+        exp:
+          type: integer
+          format: int64
+          example: 1788972000
+          description: UTC Unix timestamp indicating token expiration time.
+        iat:
+          type: integer
+          format: int64
+          example: 1788968400
+          description: UTC Unix timestamp indicating when the token was issued.
+        iss:
+          type: string
+          format: uri
+          example: https://iam.example.com
+          description: Issuer Identifier URL of the IAM Server.
+        token_type:
+          type: string
+          example: Bearer
+          description: Type of token (must be 'Bearer').
