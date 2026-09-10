@@ -1,0 +1,383 @@
+openapi: 3.0.3
+info:
+  title: IAM Server Client Interface API
+  description: >
+    Production OpenID Connect (OIDC) Core 1.0 and OAuth 2.0 PKCE Client Interface Specification
+    for Custom IAM/SSO Identity Provider serving Mobile SDKs (Android/iOS) and Web Clients.
+  version: 1.0.0
+servers:
+  - url: https://iam.example.com
+    description: Production IAM Server (Identity Provider)
+
+paths:
+  /oauth2/authorize:
+    get:
+      summary: OAuth 2.0 / OIDC Authorization Endpoint (GET)
+      description: >
+        Initiates browser-based user authentication, consent, and authorization code issuance
+        using mandatory PKCE parameters. Enforces https transport security.
+      parameters:
+        - name: response_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [code]
+          description: Value MUST be 'code' for Authorization Code Flow.
+        - name: client_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Registered OAuth 2.0 Client Identifier for the Android/iOS SDK or Web Client.
+        - name: redirect_uri
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+          description: Must exactly match a pre-registered redirect URI for the client_id.
+        - name: scope
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "openid profile email"
+          description: Space-delimited scope string; MUST contain the 'openid' scope value.
+        - name: code_challenge
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Base64URL-encoded SHA-256 hash of the client-generated code_verifier.
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [S256]
+          description: Must be set to 'S256'.
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Cryptographically random string to maintain state and mitigate CSRF attacks.
+        - name: nonce
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Cryptographic nonce string echoed verbatim in the resulting ID Token.
+        - name: prompt
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [none, login, consent, select_account]
+          description: Controls UI display behavior during authorization.
+        - name: max_age
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Maximum allowable time (in seconds) since the last active user authentication.
+        - name: ui_locales
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Space-delimited list of preferred end-user display languages.
+        - name: acr_values
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Requested Authentication Context Class Reference values.
+      responses:
+        '302':
+          description: >
+            HTTP 302 Redirect to redirect_uri containing authorization code and state parameter.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+              description: URI containing 'code' and 'state' query parameters.
+        '400':
+          description: Invalid authorization request parameter or missing openid scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthErrorResponse'
+
+    post:
+      summary: OAuth 2.0 / OIDC Authorization Endpoint (POST Form)
+      description: >
+        Alternative Form-Serialized authorization request endpoint accepting form parameters.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AuthorizationFormRequest'
+      responses:
+        '302':
+          description: HTTP 302 Found redirection with authorization code.
+        '400':
+          description: Invalid request parameters.
+
+  /oauth2/token:
+    post:
+      summary: OAuth 2.0 / OIDC Token Endpoint
+      description: >
+        Exchanges an authorization code or refresh token for Access, ID, and Refresh Tokens.
+        Requires HTTP POST with Content-Type application/x-www-form-urlencoded and returns Cache-Control: no-store.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/TokenRequestAuthorizationCode'
+                - $ref: '#/components/schemas/TokenRequestRefreshToken'
+      responses:
+        '200':
+          description: Successful token issuance.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+              description: Prevents token caching at intermediate proxies.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Invalid authorization code, PKCE verifier mismatch, or invalid refresh token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthErrorResponse'
+
+  /userinfo:
+    get:
+      summary: OpenID Connect UserInfo Endpoint (GET)
+      description: >
+        Returns verified identity claims associated with the authenticated end-user.
+        Requires an OAuth 2.0 Bearer Access Token over TLS.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: UserInfo claims payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfoResponse'
+        '401':
+          description: Unauthorized; Access Token missing, expired, or invalid.
+
+    post:
+      summary: OpenID Connect UserInfo Endpoint (POST)
+      description: Alternative HTTP POST invocation for the UserInfo endpoint.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: UserInfo claims payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfoResponse'
+        '401':
+          description: Unauthorized; Access Token invalid.
+
+  /oauth2/revoke:
+    post:
+      summary: OAuth 2.0 Token Revocation Endpoint
+      description: >
+        Invalidates active Refresh Tokens or Access Tokens upon explicit user logout.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRevocationRequest'
+      responses:
+        '200':
+          description: Token successfully revoked or previously invalid.
+        '400':
+          description: Invalid revocation request parameters.
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OAuth 2.0 Bearer Access Token issued by the IAM Server.
+
+  schemas:
+    AuthorizationFormRequest:
+      type: object
+      required:
+        - response_type
+        - client_id
+        - redirect_uri
+        - scope
+        - code_challenge
+        - code_challenge_method
+      properties:
+        response_type:
+          type: string
+          enum: [code]
+        client_id:
+          type: string
+        redirect_uri:
+          type: string
+          format: uri
+        scope:
+          type: string
+          example: "openid profile email"
+        code_challenge:
+          type: string
+        code_challenge_method:
+          type: string
+          enum: [S256]
+        state:
+          type: string
+        nonce:
+          type: string
+        prompt:
+          type: string
+          enum: [none, login, consent, select_account]
+
+    TokenRequestAuthorizationCode:
+      type: object
+      required:
+        - grant_type
+        - code
+        - redirect_uri
+        - client_id
+        - code_verifier
+      properties:
+        grant_type:
+          type: string
+          enum: [authorization_code]
+        code:
+          type: string
+          description: Authorization code received from /oauth2/authorize.
+        redirect_uri:
+          type: string
+          format: uri
+          description: MUST be identical to the redirect_uri in the initial authorization request.
+        client_id:
+          type: string
+        code_verifier:
+          type: string
+          description: High-entropy cryptographic random string matching the code_challenge hash.
+
+    TokenRequestRefreshToken:
+      type: object
+      required:
+        - grant_type
+        - refresh_token
+        - client_id
+      properties:
+        grant_type:
+          type: string
+          enum: [refresh_token]
+        refresh_token:
+          type: string
+          description: Long-lived refresh token stored in hardware Keystore/Keychain.
+        client_id:
+          type: string
+        scope:
+          type: string
+
+    TokenResponse:
+      type: object
+      required:
+        - access_token
+        - token_type
+        - expires_in
+        - id_token
+      properties:
+        access_token:
+          type: string
+          description: OAuth 2.0 Access Token attached as Bearer header to API calls.
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          example: 3600
+          description: Access token lifetime in seconds.
+        refresh_token:
+          type: string
+          description: Long-lived token for silent session renewal.
+        id_token:
+          type: string
+          description: Signed RS256 JWT containing verified user identity claims.
+        scope:
+          type: string
+          example: "openid profile email"
+
+    UserInfoResponse:
+      type: object
+      required:
+        - sub
+      properties:
+        sub:
+          type: string
+          description: Locally unique Subject Identifier string (MUST match ID Token sub claim).
+          example: "usr_9f83a21b4e"
+        name:
+          type: string
+          example: "Jane Doe"
+        email:
+          type: string
+          format: email
+          example: "jane.doe@example.com"
+        email_verified:
+          type: boolean
+          example: true
+
+    TokenRevocationRequest:
+      type: object
+      required:
+        - token
+        - client_id
+      properties:
+        token:
+          type: string
+          description: Access Token or Refresh Token to revoke.
+        token_type_hint:
+          type: string
+          enum: [refresh_token, access_token]
+        client_id:
+          type: string
+
+    OAuthErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          example: "invalid_grant"
+          enum:
+            - invalid_request
+            - invalid_client
+            - invalid_grant
+            - unauthorized_client
+            - unsupported_grant_type
+            - invalid_scope
+            - login_required
+            - interaction_required
+            - consent_required
+        error_description:
+          type: string
+          example: "The code_verifier does not match the code_challenge."
