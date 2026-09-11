@@ -5,10 +5,12 @@ info:
     Production OpenAPI 3.0 specification for the Custom IAM Server (Identity Provider).
     Covers Core OIDC/OAuth 2.0 PKCE protocols, User Account Management, MFA, Session Management,
     Dynamic Client Provisioning, Fine-Grained Authorization, and Single Logout (SLO).
-  version: 2.0.0
+  version: 2.1.0
 servers:
   - url: https://iam.example.com
-    description: Production IAM Server (Identity Provider)
+    description: Production IAM Server (Identity Provider - Stable Release)
+  - url: https://iam-staging.example.com
+    description: Staging IAM Server (Identity Provider - Rapid Update / Pre-Release)
 
 tags:
   - name: Client - Core Protocol
