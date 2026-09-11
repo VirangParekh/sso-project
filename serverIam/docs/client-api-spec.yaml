@@ -1,43 +1,42 @@
 openapi: 3.0.3
 info:
-  title: IAM Server Unified API Specification
+  title: IAM Server Unified API Specification (Primary & Supplementary)
   description: >
-    Consolidated OpenAPI 3.0 specification for the Custom IAM/SSO Identity Provider.
-    Covers both the Public Client Interface (Android SDK, iOS Framework, Web SPAs)
-    and the Machine-to-Machine Resource Server Interface (Spring Boot Server), including
-    standardized OAuth 2.0 / OIDC error response payloads.
-  version: 1.0.0
+    Production OpenAPI 3.0 specification for the Custom IAM Server (Identity Provider).
+    Covers Core OIDC/OAuth 2.0 PKCE protocols, User Account Management, MFA, Session Management,
+    Dynamic Client Provisioning, Fine-Grained Authorization, and Single Logout (SLO).
+  version: 2.0.0
 servers:
   - url: https://iam.example.com
     description: Production IAM Server (Identity Provider)
 
 tags:
-  - name: Client - Authentication & Authorization
-    description: Browser-based login, PKCE authorization code generation, and OIDC consent.
-  - name: Client - Token Management
-    description: Authorization code exchange, token refresh, and token revocation.
-  - name: Client - User Profile
-    description: End-user profile and identity claim resolution.
-  - name: Resource Server - Discovery & Metadata
-    description: OpenID Connect provider configuration discovery.
-  - name: Resource Server - Key Management
-    description: Public JSON Web Key Set (JWKS) retrieval for stateless RS256 token verification.
-  - name: Resource Server - Token Introspection
-    description: RFC 7662 token status introspection for Spring Boot or API Gateways.
+  - name: Client - Core Protocol
+    description: Core OIDC/OAuth 2.0 PKCE authorization, token issuance, userinfo, and revocation.
+  - name: Client - Account & Recovery
+    description: User self-registration, password reset, email verification, and profile management.
+  - name: Client - Multi-Factor Auth (MFA)
+    description: Secondary factor TOTP/WebAuthn enrollment and challenge verification.
+  - name: Client - Device Sessions
+    description: Active hardware session enumeration and remote refresh token revocation.
+  - name: Resource Server - Core Metadata & Keys
+    description: OIDC discovery metadata and bare JWKS public signing key publishing.
+  - name: Resource Server - Introspection & Authz
+    description: RFC 7662 token introspection, dynamic client registration, and ABAC evaluation.
+  - name: Shared - Single Logout & Telemetry
+    description: Front/Back-channel session teardown and security threat telemetry streams.
 
 paths:
   # =========================================================================
-  # CATEGORY 1: CLIENT INTERFACE ENDPOINTS
+  # CATEGORY 1: CLIENT INTERFACE - CORE OIDC / OAUTH 2.0 PROTOCOLS
   # =========================================================================
 
   /oauth2/authorize:
     get:
       summary: OAuth 2.0 / OIDC Authorization Endpoint (GET)
-      description: >
-        Initiates browser-based user authentication, consent, and authorization code issuance
-        using mandatory PKCE parameters. Enforces https transport security.
+      description: Initiates browser-based login and issues PKCE authorization codes over https.
       tags:
-        - Client - Authentication & Authorization
+        - Client - Core Protocol
       parameters:
         - name: response_type
           in: query
@@ -45,120 +44,62 @@ paths:
           schema:
             type: string
             enum: [code]
-          description: Value MUST be 'code' for Authorization Code Flow.
         - name: client_id
           in: query
           required: true
           schema:
             type: string
-          description: Registered OAuth 2.0 Client Identifier for the Android/iOS SDK or Web Client.
         - name: redirect_uri
           in: query
           required: true
           schema:
             type: string
             format: uri
-          description: Must exactly match a pre-registered redirect URI for the client_id.
         - name: scope
           in: query
           required: true
           schema:
             type: string
             example: "openid profile email"
-          description: Space-delimited scope string; MUST contain the 'openid' scope value.
         - name: code_challenge
           in: query
           required: true
           schema:
             type: string
-          description: Base64URL-encoded SHA-256 hash of the client-generated code_verifier.
         - name: code_challenge_method
           in: query
           required: true
           schema:
             type: string
             enum: [S256]
-          description: Must be set to 'S256'.
         - name: state
           in: query
           required: false
           schema:
             type: string
-          description: Cryptographically random string to maintain state and mitigate CSRF attacks.
         - name: nonce
           in: query
           required: false
           schema:
             type: string
-          description: Cryptographic nonce string echoed verbatim in the resulting ID Token.
         - name: prompt
           in: query
           required: false
           schema:
             type: string
             enum: [none, login, consent, select_account]
-          description: Controls UI display behavior during authorization.
-        - name: max_age
-          in: query
-          required: false
-          schema:
-            type: integer
-          description: Maximum allowable time (in seconds) since the last active user authentication.
-        - name: ui_locales
-          in: query
-          required: false
-          schema:
-            type: string
-          description: Space-delimited list of preferred end-user display languages.
-        - name: acr_values
-          in: query
-          required: false
-          schema:
-            type: string
-          description: Requested Authentication Context Class Reference values.
       responses:
         '302':
-          description: >
-            HTTP 302 Redirect to redirect_uri containing authorization code and state parameter.
-          headers:
-            Location:
-              schema:
-                type: string
-                format: uri
-              description: URI containing 'code' and 'state' query parameters.
+          description: HTTP 302 Redirect containing authorization code and state.
         '400':
-          $ref: '#/components/responses/BadRequestError'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
-    post:
-      summary: OAuth 2.0 / OIDC Authorization Endpoint (POST Form)
-      description: >
-        Alternative Form-Serialized authorization request endpoint accepting form parameters.
-      tags:
-        - Client - Authentication & Authorization
-      requestBody:
-        required: true
-        content:
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/AuthorizationFormRequest'
-      responses:
-        '302':
-          description: HTTP 302 Found redirection with authorization code.
-        '400':
-          $ref: '#/components/responses/BadRequestError'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
+          $ref: '#/components/responses/OAuthBadRequest'
 
   /oauth2/token:
     post:
       summary: OAuth 2.0 / OIDC Token Endpoint
-      description: >
-        Exchanges an authorization code or refresh token for Access, ID, and Refresh Tokens.
-        Requires HTTP POST with Content-Type application/x-www-form-urlencoded and returns Cache-Control: no-store.
+      description: Exchanges authorization code or refresh token for Access, ID, and Refresh Tokens.
       tags:
-        - Client - Token Management
+        - Client - Core Protocol
       requestBody:
         required: true
         content:
@@ -175,70 +116,39 @@ paths:
               schema:
                 type: string
                 enum: [no-store]
-              description: Prevents token caching at intermediate proxies.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TokenResponse'
         '400':
-          $ref: '#/components/responses/BadRequestError'
+          $ref: '#/components/responses/OAuthBadRequest'
         '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
+          $ref: '#/components/responses/OAuthUnauthorized'
 
   /userinfo:
     get:
-      summary: OpenID Connect UserInfo Endpoint (GET)
-      description: >
-        Returns verified identity claims associated with the authenticated end-user.
-        Requires an OAuth 2.0 Bearer Access Token over TLS.
+      summary: OpenID Connect UserInfo Endpoint
+      description: Returns verified identity claims associated with the Bearer Access Token.
       tags:
-        - Client - User Profile
+        - Client - Core Protocol
       security:
         - BearerAuth: []
       responses:
         '200':
-          description: UserInfo claims payload.
+          description: Identity claims payload containing sub claim.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserInfoResponse'
         '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '403':
-          $ref: '#/components/responses/ForbiddenError'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
-    post:
-      summary: OpenID Connect UserInfo Endpoint (POST)
-      description: Alternative HTTP POST invocation for the UserInfo endpoint.
-      tags:
-        - Client - User Profile
-      security:
-        - BearerAuth: []
-      responses:
-        '200':
-          description: UserInfo claims payload.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserInfoResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '403':
-          $ref: '#/components/responses/ForbiddenError'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
+          $ref: '#/components/responses/OAuthUnauthorized'
 
   /oauth2/revoke:
     post:
-      summary: OAuth 2.0 Token Revocation Endpoint
-      description: >
-        Invalidates active Refresh Tokens or Access Tokens upon explicit user logout.
+      summary: Token Revocation Endpoint
+      description: Revokes active tokens and triggers local Keystore/Keychain cleanup.
       tags:
-        - Client - Token Management
+        - Client - Core Protocol
       requestBody:
         required: true
         content:
@@ -247,70 +157,224 @@ paths:
               $ref: '#/components/schemas/TokenRevocationRequest'
       responses:
         '200':
-          description: Token successfully revoked or previously invalid.
+          description: Token revoked successfully.
         '400':
-          $ref: '#/components/responses/BadRequestError'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
+          $ref: '#/components/responses/OAuthBadRequest'
 
   # =========================================================================
-  # CATEGORY 2: RESOURCE SERVER INTERFACE ENDPOINTS
+  # CATEGORY 2: CLIENT INTERFACE - ACCOUNT, RECOVERY, & MFA APIs
+  # =========================================================================
+
+  /api/v1/users/register:
+    post:
+      summary: User Self-Registration Endpoint
+      description: Provisions new user accounts prior to executing PKCE login flows.
+      tags:
+        - Client - Account & Recovery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRegistrationRequest'
+      responses:
+        '201':
+          description: User account successfully created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserAccountResponse'
+        '400':
+          $ref: '#/components/responses/OAuthBadRequest'
+
+  /api/v1/users/me/password:
+    post:
+      summary: Self-Service Password Update Endpoint
+      description: Updates user credentials using authenticated session tokens.
+      tags:
+        - Client - Account & Recovery
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordUpdateRequest'
+      responses:
+        '200':
+          description: Password updated successfully.
+        '401':
+          $ref: '#/components/responses/OAuthUnauthorized'
+
+  /api/v1/auth/forgot-password:
+    post:
+      summary: Forgot Password Request Endpoint
+      description: Generates an out-of-band password recovery token sent via email/SMS.
+      tags:
+        - Client - Account & Recovery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgotPasswordRequest'
+      responses:
+        '202':
+          description: Password reset request accepted.
+
+  /api/v1/auth/reset-password:
+    post:
+      summary: Password Reset Execution Endpoint
+      description: Consumes recovery token to set new credentials.
+      tags:
+        - Client - Account & Recovery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '200':
+          description: Password reset successfully.
+        '400':
+          $ref: '#/components/responses/OAuthBadRequest'
+
+  /api/v1/auth/verify-email:
+    post:
+      summary: Email Verification Endpoint
+      description: Validates email verification token sent during onboarding.
+      tags:
+        - Client - Account & Recovery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailVerificationRequest'
+      responses:
+        '200':
+          description: Email verified successfully.
+        '400':
+          $ref: '#/components/responses/OAuthBadRequest'
+
+  /oauth2/mfa/enroll:
+    post:
+      summary: MFA Enrollment Endpoint
+      description: Generates TOTP secret key / QR code or WebAuthn registration challenge.
+      tags:
+        - Client - Multi-Factor Auth (MFA)
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaEnrollmentRequest'
+      responses:
+        '200':
+          description: MFA challenge payload issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaEnrollmentResponse'
+
+  /oauth2/mfa/verify:
+    post:
+      summary: MFA Verification Endpoint
+      description: Validates TOTP passcode or WebAuthn signature during authentication.
+      tags:
+        - Client - Multi-Factor Auth (MFA)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaVerificationRequest'
+      responses:
+        '200':
+          description: MFA challenge verified.
+        '400':
+          $ref: '#/components/responses/OAuthBadRequest'
+
+  /api/v1/users/me/sessions:
+    get:
+      summary: Active Device Sessions Enumeration
+      description: Returns list of active hardware device sessions for authenticated user.
+      tags:
+        - Client - Device Sessions
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Array of active hardware session records.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeviceSession'
+
+  /api/v1/users/me/sessions/{sessionId}:
+    delete:
+      summary: Remote Hardware Session Revocation
+      description: Revokes specific device session and invalidates its stored Refresh Token.
+      tags:
+        - Client - Device Sessions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session revoked.
+        '404':
+          $ref: '#/components/responses/OAuthNotFound'
+
+  # =========================================================================
+  # CATEGORY 3: RESOURCE SERVER INTERFACE ENDPOINTS
   # =========================================================================
 
   /.well-known/openid-configuration:
     get:
-      summary: OpenID Provider Discovery Endpoint
-      description: >
-        Exposes OpenID Connect Provider metadata allowing the Spring Boot Resource Server
-        to dynamically discover endpoint URIs, supported algorithms, and capability parameters.
+      summary: OIDC Discovery Metadata Endpoint
+      description: Exposes issuer config and endpoints for Spring Boot auto-configuration.
       tags:
-        - Resource Server - Discovery & Metadata
+        - Resource Server - Core Metadata & Keys
       responses:
         '200':
-          description: Successfully returned OpenID Provider configuration metadata.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                example: max-age=3600, public
+          description: OIDC Provider Metadata.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/OpenIDProviderConfiguration'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
 
   /.well-known/jwks.json:
     get:
-      summary: JSON Web Key Set (JWKS) Endpoint
-      description: >
-        Publishes the IAM Server's public bare keys in JWK format. The Spring Boot Resource Server
-        retrieves these keys to statelessly verify the RS256 cryptographic signature of incoming JWT Access Tokens.
+      summary: Public JSON Web Key Set (JWKS) Endpoint
+      description: Publishes bare RS256 public keys for stateless backend JWT validation.
       tags:
-        - Resource Server - Key Management
+        - Resource Server - Core Metadata & Keys
       responses:
         '200':
-          description: Successfully returned JSON Web Key Set containing active public signing keys.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                example: max-age=86400, public
+          description: Public signing key set.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/JWKSResponse'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
 
   /oauth2/introspect:
     post:
-      summary: OAuth 2.0 Token Introspection Endpoint (RFC 7662)
-      description: >
-        Allows the Spring Boot Resource Server or API Gateway to query the active status and embedded metadata
-        of an Access Token or Refresh Token. Secured via HTTP Basic Authentication using Resource Server client credentials.
+      summary: Token Introspection Endpoint (RFC 7662)
+      description: Machine-to-machine endpoint checking active token status and claims.
       tags:
-        - Resource Server - Token Introspection
+        - Resource Server - Introspection & Authz
       security:
         - ResourceServerBasicAuth: []
       requestBody:
@@ -321,22 +385,140 @@ paths:
               $ref: '#/components/schemas/TokenIntrospectionRequest'
       responses:
         '200':
-          description: Successfully introspected token status. Returns active boolean and associated claim metadata.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                example: no-store
+          description: Active token claim payload.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TokenIntrospectionResponse'
-        '400':
-          $ref: '#/components/responses/BadRequestError'
         '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
+          $ref: '#/components/responses/OAuthUnauthorized'
+
+  /api/v1/clients:
+    post:
+      summary: Dynamic Client Registration (RFC 7591)
+      description: Provisions new OAuth clients, redirect URIs, and allowed scope arrays.
+      tags:
+        - Resource Server - Introspection & Authz
+      security:
+        - ResourceServerBasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientRegistrationRequest'
+      responses:
+        '201':
+          description: Client registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientRegistrationResponse'
+
+  /oauth2/permissions/check:
+    post:
+      summary: Fine-Grained Authorization Evaluation (ABAC)
+      description: Evaluates dynamic policy permissions for Resource Server requests.
+      tags:
+        - Resource Server - Introspection & Authz
+      security:
+        - ResourceServerBasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PermissionCheckRequest'
+      responses:
+        '200':
+          description: Authorization decision response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PermissionCheckResponse'
+
+  /api/v1/events/jwks-rotation:
+    post:
+      summary: JWKS Key Rotation Webhook Trigger
+      description: Pushes key rotation notification to invalidate Spring Boot local key caches.
+      tags:
+        - Resource Server - Core Metadata & Keys
+      security:
+        - ResourceServerBasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KeyRotationNotification'
+      responses:
+        '200':
+          description: Notification acknowledged.
+
+  # =========================================================================
+  # CATEGORY 4: SHARED DUAL-INTERFACE APIs (SLO & TELEMETRY)
+  # =========================================================================
+
+  /oauth2/logout:
+    get:
+      summary: Front-Channel Single Logout (SLO) Endpoint
+      description: Clears user session cookies and redirects to client post-logout URI.
+      tags:
+        - Shared - Single Logout & Telemetry
+      parameters:
+        - name: id_token_hint
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: post_logout_redirect_uri
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uri
+      responses:
+        '302':
+          description: Redirected to post_logout_redirect_uri.
+
+  /oauth2/backchannel-logout:
+    post:
+      summary: OIDC Back-Channel Logout Endpoint
+      description: Sends out-of-band Logout Tokens to Spring Boot Resource Servers.
+      tags:
+        - Shared - Single Logout & Telemetry
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BackchannelLogoutRequest'
+      responses:
+        '200':
+          description: Back-channel logout processed.
+
+  /api/v1/security/telemetry:
+    post:
+      summary: Security Event Telemetry Ingestion Endpoint
+      description: Ingests client/server security anomaly reports (jailbreak, rate abuse).
+      tags:
+        - Shared - Single Logout & Telemetry
+      security:
+        - BearerAuth: []
+        - ResourceServerBasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SecurityTelemetryEvent'
+      responses:
+        '202':
+          description: Security telemetry ingested.
+
+# =========================================================================
+# REUSABLE COMPONENTS & SCHEMAS
+# =========================================================================
 
 components:
   securitySchemes:
@@ -344,81 +526,42 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: OAuth 2.0 Bearer Access Token issued by the IAM Server.
     ResourceServerBasicAuth:
       type: http
       scheme: basic
-      description: >
-        HTTP Basic Authentication header using the Resource Server's registered client_id and client_secret
-        (Base64 encoded as 'Basic <credentials>').
 
   responses:
-    BadRequestError:
-      description: Invalid request parameters, missing required fields, or PKCE verifier mismatch (HTTP 400).
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/OAuth2ErrorResponse'
-          examples:
-            InvalidGrant:
-              summary: PKCE Verification Failure or Expired Code
-              value:
-                error: invalid_grant
-                error_description: The code_verifier does not match the code_challenge or the authorization code is expired.
-                error_uri: https://iam.example.com/docs/errors#invalid_grant
-            InvalidRequest:
-              summary: Missing Mandatory Parameter
-              value:
-                error: invalid_request
-                error_description: Missing required parameter 'code_challenge'.
-                error_uri: https://iam.example.com/docs/errors#invalid_request
-
-    UnauthorizedError:
-      description: Authentication failed due to missing, invalid, or expired client credentials or access tokens (HTTP 401).
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/OAuth2ErrorResponse'
-          examples:
-            InvalidClient:
-              summary: Client Authentication Failure
-              value:
-                error: invalid_client
-                error_description: Client authentication failed (e.g. unknown client or invalid client secret).
-                error_uri: https://iam.example.com/docs/errors#invalid_client
-            InvalidToken:
-              summary: Expired or Malformed Bearer Token
-              value:
-                error: invalid_token
-                error_description: The Access Token expired or has an invalid signature.
-                error_uri: https://iam.example.com/docs/errors#invalid_token
-
-    ForbiddenError:
-      description: Insufficient permissions or scopes to access the requested resource (HTTP 403).
+    OAuthBadRequest:
+      description: Invalid request parameters or protocol constraint violation.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/OAuth2ErrorResponse'
           example:
-            error: insufficient_scope
-            error_description: The request requires the 'profile' scope.
-            error_uri: https://iam.example.com/docs/errors#insufficient_scope
+            error: invalid_request
+            error_description: "Missing required parameter: code_challenge."
 
-    InternalServerError:
-      description: Unexpected IAM server error (HTTP 500).
+    OAuthUnauthorized:
+      description: Missing, expired, or invalid credentials/token.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/OAuth2ErrorResponse'
           example:
-            error: server_error
-            error_description: The authorization server encountered an unexpected condition that prevented it from fulfilling the request.
-            error_uri: https://iam.example.com/docs/errors#server_error
+            error: invalid_token
+            error_description: "The access token has expired."
+
+    OAuthNotFound:
+      description: Requested resource or session ID not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OAuth2ErrorResponse'
+          example:
+            error: not_found
+            error_description: "Session ID does not exist."
 
   schemas:
-    # -------------------------------------------------------------------------
-    # ERROR RESPONSE SCHEMA
-    # -------------------------------------------------------------------------
     OAuth2ErrorResponse:
       type: object
       required:
@@ -426,7 +569,6 @@ components:
       properties:
         error:
           type: string
-          description: Standardized OAuth 2.0 / OIDC error code string.
           example: invalid_grant
           enum:
             - invalid_request
@@ -435,60 +577,19 @@ components:
             - unauthorized_client
             - unsupported_grant_type
             - invalid_scope
+            - invalid_token
+            - insufficient_scope
             - login_required
             - interaction_required
             - consent_required
-            - account_selection_required
-            - insufficient_scope
-            - invalid_token
+            - not_found
             - server_error
-            - temporarily_unavailable
         error_description:
           type: string
-          description: Human-readable text providing additional details about the error.
-          example: The authorization code has expired or is invalid.
+          example: "The authorization code has expired or was previously used."
         error_uri:
           type: string
           format: uri
-          description: Optional URI identifying a human-readable web page with error info.
-          example: https://iam.example.com/docs/errors#invalid_grant
-
-    # -------------------------------------------------------------------------
-    # CLIENT INTERFACE SCHEMAS
-    # -------------------------------------------------------------------------
-    AuthorizationFormRequest:
-      type: object
-      required:
-        - response_type
-        - client_id
-        - redirect_uri
-        - scope
-        - code_challenge
-        - code_challenge_method
-      properties:
-        response_type:
-          type: string
-          enum: [code]
-        client_id:
-          type: string
-        redirect_uri:
-          type: string
-          format: uri
-        scope:
-          type: string
-          example: "openid profile email"
-        code_challenge:
-          type: string
-        code_challenge_method:
-          type: string
-          enum: [S256]
-        state:
-          type: string
-        nonce:
-          type: string
-        prompt:
-          type: string
-          enum: [none, login, consent, select_account]
 
     TokenRequestAuthorizationCode:
       type: object
@@ -504,16 +605,13 @@ components:
           enum: [authorization_code]
         code:
           type: string
-          description: Authorization code received from /oauth2/authorize.
         redirect_uri:
           type: string
           format: uri
-          description: MUST be identical to the redirect_uri in the initial authorization request.
         client_id:
           type: string
         code_verifier:
           type: string
-          description: High-entropy cryptographic random string matching the code_challenge hash.
 
     TokenRequestRefreshToken:
       type: object
@@ -527,10 +625,7 @@ components:
           enum: [refresh_token]
         refresh_token:
           type: string
-          description: Long-lived refresh token stored in hardware Keystore/Keychain.
         client_id:
-          type: string
-        scope:
           type: string
 
     TokenResponse:
@@ -543,23 +638,18 @@ components:
       properties:
         access_token:
           type: string
-          description: OAuth 2.0 Access Token attached as Bearer header to API calls.
         token_type:
           type: string
           enum: [Bearer]
         expires_in:
           type: integer
           example: 3600
-          description: Access token lifetime in seconds.
         refresh_token:
           type: string
-          description: Long-lived token for silent session renewal.
         id_token:
           type: string
-          description: Signed RS256 JWT containing verified user identity claims.
         scope:
           type: string
-          example: "openid profile email"
 
     UserInfoResponse:
       type: object
@@ -568,126 +658,164 @@ components:
       properties:
         sub:
           type: string
-          description: Locally unique Subject Identifier string (MUST match ID Token sub claim).
           example: "usr_9f83a21b4e"
         name:
           type: string
-          example: "Jane Doe"
         email:
           type: string
           format: email
-          example: "jane.doe@example.com"
-        email_verified:
-          type: boolean
-          example: true
 
     TokenRevocationRequest:
       type: object
       required:
-        - token:
+        - token
         - client_id
       properties:
         token:
           type: string
-          description: Access Token or Refresh Token to revoke.
         token_type_hint:
           type: string
           enum: [refresh_token, access_token]
         client_id:
           type: string
 
-    # -------------------------------------------------------------------------
-    # RESOURCE SERVER INTERFACE SCHEMAS
-    # -------------------------------------------------------------------------
+    UserRegistrationRequest:
+      type: object
+      required:
+        - username
+        - email
+        - password
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    UserAccountResponse:
+      type: object
+      required:
+        - id
+        - username
+        - email
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+        status:
+          type: string
+
+    PasswordUpdateRequest:
+      type: object
+      required:
+        - current_password
+        - new_password
+      properties:
+        current_password:
+          type: string
+        new_password:
+          type: string
+
+    ForgotPasswordRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+
+    ResetPasswordRequest:
+      type: object
+      required:
+        - token
+        - new_password
+      properties:
+        token:
+          type: string
+        new_password:
+          type: string
+
+    EmailVerificationRequest:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+
+    MfaEnrollmentRequest:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum: [totp, webauthn]
+
+    MfaEnrollmentResponse:
+      type: object
+      required:
+        - secret_qr
+      properties:
+        secret_qr:
+          type: string
+        recovery_codes:
+          type: array
+          items:
+            type: string
+
+    MfaVerificationRequest:
+      type: object
+      required:
+        - mfa_token
+        - passcode
+      properties:
+        mfa_token:
+          type: string
+        passcode:
+          type: string
+
+    DeviceSession:
+      type: object
+      required:
+        - session_id
+        - device_os
+        - ip_address
+        - last_active
+      properties:
+        session_id:
+          type: string
+        device_os:
+          type: string
+          example: "Android 14"
+        ip_address:
+          type: string
+        last_active:
+          type: integer
+
     OpenIDProviderConfiguration:
       type: object
       required:
         - issuer
         - authorization_endpoint
         - token_endpoint
-        - userinfo_endpoint
         - jwks_uri
-        - response_types_supported
-        - subject_types_supported
-        - id_token_signing_alg_values_supported
       properties:
         issuer:
           type: string
-          format: uri
-          example: https://iam.example.com
-          description: Case-sensitive HTTPS Issuer Identifier URL of the IAM Server.
         authorization_endpoint:
           type: string
-          format: uri
-          example: https://iam.example.com/oauth2/authorize
-          description: URL of the IAM Server's OAuth 2.0 / OIDC Authorization Endpoint.
         token_endpoint:
           type: string
-          format: uri
-          example: https://iam.example.com/oauth2/token
-          description: URL of the IAM Server's OAuth 2.0 / OIDC Token Endpoint.
-        userinfo_endpoint:
-          type: string
-          format: uri
-          example: https://iam.example.com/userinfo
-          description: URL of the IAM Server's UserInfo Endpoint.
         jwks_uri:
           type: string
-          format: uri
-          example: https://iam.example.com/.well-known/jwks.json
-          description: URL of the IAM Server's JSON Web Key Set (JWKS) Endpoint.
-        revocation_endpoint:
-          type: string
-          format: uri
-          example: https://iam.example.com/oauth2/revoke
-          description: URL of the IAM Server's Token Revocation Endpoint.
-        introspection_endpoint:
-          type: string
-          format: uri
-          example: https://iam.example.com/oauth2/introspect
-          description: URL of the IAM Server's Token Introspection Endpoint.
-        response_types_supported:
-          type: array
-          items:
-            type: string
-          example: ["code"]
-          description: Supported OAuth 2.0 response_type values.
-        subject_types_supported:
-          type: array
-          items:
-            type: string
-          example: ["public"]
-          description: Supported Subject Identifier types (public or pairwise).
-        id_token_signing_alg_values_supported:
-          type: array
-          items:
-            type: string
-          example: ["RS256"]
-          description: Supported JWS signature algorithms for ID Tokens (must include RS256).
-        scopes_supported:
-          type: array
-          items:
-            type: string
-          example: ["openid", "profile", "email", "offline_access"]
-          description: Supported OAuth 2.0 scope values.
-        token_endpoint_auth_methods_supported:
-          type: array
-          items:
-            type: string
-          example: ["none", "client_secret_basic", "client_secret_post"]
-          description: Client authentication methods supported by the Token Endpoint.
-        claims_supported:
-          type: array
-          items:
-            type: string
-          example: ["iss", "sub", "aud", "exp", "iat", "nonce", "auth_time", "acr", "name", "email", "email_verified"]
-          description: Standard OIDC claims supported by this provider.
-        code_challenge_methods_supported:
-          type: array
-          items:
-            type: string
-          example: ["S256"]
-          description: PKCE code challenge methods supported (must include S256).
 
     JWKSResponse:
       type: object
@@ -696,46 +824,8 @@ components:
       properties:
         keys:
           type: array
-          description: Array of JSON Web Keys (JWK) representing public signing keys.
           items:
-            $ref: '#/components/schemas/JWKKey'
-
-    JWKKey:
-      type: object
-      required:
-        - kty
-        - use
-        - alg
-        - kid
-        - n
-        - e
-      properties:
-        kty:
-          type: string
-          enum: [RSA, EC]
-          example: RSA
-          description: Key Type. Must be 'RSA' for RS256 key pairs.
-        use:
-          type: string
-          enum: [sig, enc]
-          example: sig
-          description: Intended key usage. 'sig' indicates cryptographic signature verification.
-        alg:
-          type: string
-          example: RS256
-          description: Algorithm intended for use with the key. Must be RS256.
-        kid:
-          type: string
-          example: iam-rsa-key-2026-01
-          description: Key ID identifier used to match the 'kid' claim in JWT headers.
-        n:
-          type: string
-          example: u1W_qX82aM...
-          description: Base64URL-encoded modulus value for the RSA public key.
-        e:
-          type: string
-          example: AQAB
-          description: Base64URL-encoded exponent value for the RSA public key (typically 'AQAB').
+            type: object
 
     TokenIntrospectionRequest:
       type: object
@@ -744,13 +834,6 @@ components:
       properties:
         token:
           type: string
-          description: The string value of the Access Token or Refresh Token to be introspected.
-          example: eyJhbGciOiJSUzI1NiIsImtpZCI6ImlhbS1yc2EtMSIs...
-        token_type_hint:
-          type: string
-          enum: [access_token, refresh_token]
-          example: access_token
-          description: Optional hint regarding the type of token presented.
 
     TokenIntrospectionResponse:
       type: object
@@ -759,36 +842,93 @@ components:
       properties:
         active:
           type: boolean
-          example: true
-          description: Boolean indicator showing whether the presented token is currently active and valid.
-        scope:
-          type: string
-          example: openid profile read:resources write:resources
-          description: Space-delimited list of authorized scope permissions granted to the token.
-        client_id:
-          type: string
-          example: mobile_android_client_id
-          description: Client identifier of the party to which the token was issued.
         sub:
           type: string
-          example: usr_9f83a21b4e
-          description: Subject Identifier of the user associated with the token.
-        exp:
-          type: integer
-          format: int64
-          example: 1788972000
-          description: UTC Unix timestamp indicating token expiration time.
-        iat:
-          type: integer
-          format: int64
-          example: 1788968400
-          description: UTC Unix timestamp indicating when the token was issued.
-        iss:
+        scope:
           type: string
-          format: uri
-          example: https://iam.example.com
-          description: Issuer Identifier URL of the IAM Server.
-        token_type:
+
+    ClientRegistrationRequest:
+      type: object
+      required:
+        - client_name
+        - redirect_uris
+        - grant_types
+      properties:
+        client_name:
           type: string
-          example: Bearer
-          description: Type of token (must be 'Bearer').
+        redirect_uris:
+          type: array
+          items:
+            type: string
+        grant_types:
+          type: array
+          items:
+            type: string
+
+    ClientRegistrationResponse:
+      type: object
+      required:
+        - client_id
+      properties:
+        client_id:
+          type: string
+        client_secret:
+          type: string
+
+    PermissionCheckRequest:
+      type: object
+      required:
+        - subject
+        - resource
+        - action
+      properties:
+        subject:
+          type: string
+        resource:
+          type: string
+        action:
+          type: string
+
+    PermissionCheckResponse:
+      type: object
+      required:
+        - allowed
+      properties:
+        allowed:
+          type: boolean
+        reason:
+          type: string
+
+    KeyRotationNotification:
+      type: object
+      required:
+        - event
+        - kid
+      properties:
+        event:
+          type: string
+          example: "JWKS_ROTATION"
+        kid:
+          type: string
+
+    BackchannelLogoutRequest:
+      type: object
+      required:
+        - logout_token
+      properties:
+        logout_token:
+          type: string
+
+    SecurityTelemetryEvent:
+      type: object
+      required:
+        - event_type
+        - client_id
+      properties:
+        event_type:
+          type: string
+          example: "JAILBREAK_DETECTED"
+        client_id:
+          type: string
+        details:
+          type: string
